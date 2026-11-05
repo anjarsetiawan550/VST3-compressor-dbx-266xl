@@ -1,0 +1,64 @@
+name: Build VST3 + Standalone
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            tag: windows
+          - name: macOS
+            os: macos-latest
+            tag: macos
+            extra: -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ambil ASIO SDK (Windows, untuk ASIO di Standalone)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          if [ ! -f ASIOSDK/common/asio.h ]; then
+            rm -rf ASIOSDK
+            git clone --depth 1 https://github.com/jcelerier/asio-2 ASIOSDK || true
+          fi
+          if [ ! -f ASIOSDK/common/asio.h ]; then
+            echo "::error::ASIO SDK gagal diunduh. Unduh ASIO SDK dari Steinberg dan taruh folder 'ASIOSDK' (berisi common/ dan host/) di repo."
+            exit 1
+          fi
+          ls ASIOSDK ASIOSDK/common
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.extra }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Package
+        working-directory: build/DBX266XL_artefacts/Release
+        run: cmake -E tar cf ${{ github.workspace }}/LR-266XL-${{ matrix.tag }}.zip --format=zip VST3 Standalone
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LR-266XL-${{ matrix.tag }}
+          path: LR-266XL-${{ matrix.tag }}.zip
+          if-no-files-found: error
+
+      - name: Release (saat push tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: LR-266XL-${{ matrix.tag }}.zip
